@@ -8,6 +8,8 @@ import plotly.graph_objects as go
 def hpa_drift(x, t, a1, b1, a2, b2, a3, b3, k, u, kgr):
     x1, x2, x3, x3b = x
     # Avoid division-by-zero
+    # x1 = max(x1, 1)
+    # x2 = max(x2, 1e-1)
     x3 = max(x3, 1e-6)
     x3b = max(x3b, 1e-6)
     mrb = 1.0 / x3b
@@ -29,7 +31,7 @@ def sde_solver_system(drift, x0, t, sigma, params, amplitude, period):
     dt = t[1] - t[0]
     for i in range(1, n):
         sin_wave = amplitude * np.sin(2 * np.pi * t[i - 1] / period)
-        dw = np.random.normal(scale= np.sqrt(dt))  # Single noise term for x1
+        dw = np.abs(np.random.normal(scale= np.sqrt(dt)) ) # Single noise term for x1
         x[i] = x[i - 1] + drift(x[i - 1], t[i - 1], *params) * dt
         x[i][0] += sigma * dw + sin_wave  # Apply noise and sin wave to x1
     return x
@@ -60,7 +62,7 @@ b2 = st.sidebar.number_input("b2", min_value=0.0, max_value=2.0, value=0.14, ste
 a3 = st.sidebar.number_input("a3", min_value=0.0, max_value=2.0, value=0.0086, step=1e-4)
 b3 = st.sidebar.number_input("b3", min_value=0.0, max_value=2.0, value=0.086, step=1e-4)
 k = st.sidebar.number_input("k", min_value=0.0, max_value=2.0, value=0.05, step=1e-4)
-u = st.sidebar.number_input("u", min_value=0.0, max_value=5.0, value=1.0, step=0.1)
+u = st.sidebar.number_input("u", min_value=0.0, max_value=10.0, value=1.0, step=0.1)
 kgr = st.sidebar.number_input("kgr", min_value=0.1, max_value=10.0, value=5.0, step=0.1)
 amplitude = st.sidebar.slider("Amplitude of sin wave", min_value=0.0, max_value=1.0, value=0.3, step=0.01)
 period_in_hours = st.sidebar.slider("Period of sin wave (hours)", min_value=1, max_value=24, value=24, step=1)
@@ -92,47 +94,63 @@ sol = sde_solver_system(hpa_drift, x0, t, sigma, params, amplitude, period)
 if st.checkbox("Normalise the concentrations"):
     sol = sol / np.max(sol, axis=0)
 # Plotting
-t = t / 60  # Convert time to hours
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=t, y=sol[:, 0], mode="lines", name="x1"))
-fig.add_trace(go.Scatter(x=t, y=sol[:, 1], mode="lines", name="x2"))
-fig.add_trace(go.Scatter(x=t, y=sol[:, 2], mode="lines", name="x3"))
-fig.add_trace(go.Scatter(x=t, y=sol[:, 3], mode="lines", name="x3b"))
-fig.update_layout(
-    title="HPA Axis Simulation",
-    xaxis_title="Time (hours)",
-    yaxis_title="Concentrations",
-    template="plotly_white",
-)
+t = t  # Convert time to hours
+st.write(f'steady state: {steady_state}')
+if st.checkbox("Matplotlib Plot"):
 
-# Add grid lines to the plot
-fig.update_xaxes(showgrid=True)
-fig.update_yaxes(showgrid=True)
+    import matplotlib.pyplot as plt
 
-st.plotly_chart(fig)
-
-
-# SVG Download
-filename = st.text_input("Filename", "hpa_simulation")
-if "svg_data" not in st.session_state:
-    st.session_state.svg_data = None
-
-
-def fig_to_svg(fig):
-    img_bytes = fig.to_image(format="svg")
-    return img_bytes.decode("utf-8")
-
-
-if st.button("Convert Plot to SVG"):
-    st.session_state.svg_data = fig_to_svg(fig)
-
-if st.session_state.svg_data is not None:
-    st.download_button(
-        label="Download Plot as SVG",
-        data=st.session_state.svg_data.encode("utf-8"),
-        file_name=f"{filename}.svg",
-        mime="image/svg+xml",
+    fig, ax = plt.subplots()
+    ax.plot(t, sol[:, 0], label="x1")
+    ax.plot(t, sol[:, 1], label="x2")
+    ax.plot(t, sol[:, 2], label="x3")
+    ax.plot(t, sol[:, 3], label="x3b")
+    ax.set_xlabel("Time (hours)")
+    ax.set_ylabel("Concentrations")
+    ax.set_title("HPA Axis Simulation")
+    ax.legend()
+    st.pyplot(fig)
+else:
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=t, y=sol[:, 0], mode="lines", name="x1"))
+    fig.add_trace(go.Scatter(x=t, y=sol[:, 1], mode="lines", name="x2"))
+    fig.add_trace(go.Scatter(x=t, y=sol[:, 2], mode="lines", name="x3"))
+    fig.add_trace(go.Scatter(x=t, y=sol[:, 3], mode="lines", name="x3b"))
+    fig.update_layout(
+        title="HPA Axis Simulation",
+        xaxis_title="Time (hours)",
+        yaxis_title="Concentrations",
+        template="plotly_white",
     )
+
+    # Add grid lines to the plot
+    fig.update_xaxes(showgrid=True)
+    fig.update_yaxes(showgrid=True)
+
+    st.plotly_chart(fig)
+
+
+    # SVG Download
+    filename = st.text_input("Filename", "hpa_simulation")
+    if "svg_data" not in st.session_state:
+        st.session_state.svg_data = None
+
+
+    def fig_to_svg(fig):
+        img_bytes = fig.to_image(format="svg")
+        return img_bytes.decode("utf-8")
+
+
+    if st.button("Convert Plot to SVG"):
+        st.session_state.svg_data = fig_to_svg(fig)
+
+    if st.session_state.svg_data is not None:
+        st.download_button(
+            label="Download Plot as SVG",
+            data=st.session_state.svg_data.encode("utf-8"),
+            file_name=f"{filename}.svg",
+            mime="image/svg+xml",
+        )
 
 st.markdown(
     """
