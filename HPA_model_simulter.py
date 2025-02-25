@@ -3,154 +3,137 @@ import numpy as np
 from scipy.optimize import fsolve
 import plotly.graph_objects as go
 
+st.sidebar.title("Simulation Parameters")
 
-# Drift function for the HPA axis
-def hpa_drift(x, t, a1, b1, a2, b2, a3, b3, k, u, kgr):
-    x1, x2, x3, x3b = x
-    # Avoid division-by-zero
-    # x1 = max(x1, 1)
-    # x2 = max(x2, 1e-1)
-    x3 = max(x3, 1e-6)
-    x3b = max(x3b, 1e-6)
-    mrb = 1.0 / x3b
-    gr = 1.0 / (1 + (x3 / kgr) ** 3)
-    grb = 1.0 / (1 + (x3b / kgr) ** 3)
-    dx1 = b1 * grb * mrb * u - a1 * x1
-    dx2 = b2 * x1 * gr - a2 * x2
-    dx3 = b3 * x2 - a3 * x3
-    dx3b = k * (x3 - x3b) - a3 * x3b
-    return np.array([dx1, dx2, dx3, dx3b])
+db_temp = st.sidebar.slider("db", min_value=-0.1, max_value=0.1, value=0.0, step=1e-3) / 100 
+du_temp = st.sidebar.slider("du", min_value=-5.0, max_value=0.0, value=-0.1, step=1e-3, format="%.4f") / 100
+b = st.sidebar.slider("b", min_value=0.0, max_value=1.0, value=0.2, step=1e-2)
+u = st.sidebar.slider("u", min_value=0.0, max_value=5.0, value=0.0, step=0.1)
+end_time = st.sidebar.slider("Until time", min_value=0, max_value=300, value=100, step=1)
+start_time = st.sidebar.slider("From time", min_value=0, max_value=100, value=10, step=1)
+def one_d_model_drift(x, t, u_val_treat = 0, db_val_treat=0):
+    x_cur, b_cur, u_cur = x
+    if t  > start_time and t < end_time:
+        dx = x_cur**2 * (1 - x_cur) - b_cur * x_cur + u_val_treat
+        du = 0
+        db = db_val_treat
+    else:
+        # dx = x_cur**2 * (1 - x_cur) - b * x_cur + u
+        u_cur = 0
+        dx = x_cur**2 * (1 - x_cur) - b_cur * x_cur + u_cur
+        du = 0
+        db = 0
+    return np.array([dx, db, du])
 
 
 # Euler–Maruyama SDE solver for systems
-def sde_solver_system(drift, x0, t, sigma, params, amplitude, period):
+def sde_solver_system(drift, x0, t, sigma, params=None):
+    if params is None:
+        params = ()
     n = len(t)
     d = len(x0)
     x = np.zeros((n, d))
     x[0] = x0
     dt = t[1] - t[0]
     for i in range(1, n):
-        sin_wave = amplitude * np.sin(2 * np.pi * t[i - 1] / period)
-        dw = np.abs(np.random.normal(scale= np.sqrt(dt)) ) # Single noise term for x1
+        dw = np.random.normal(scale=np.sqrt(dt))  # Single noise term for x1
         x[i] = x[i - 1] + drift(x[i - 1], t[i - 1], *params) * dt
-        x[i][0] += sigma * dw + sin_wave  # Apply noise and sin wave to x1
+        x[i][0] += sigma * dw
     return x
 
 
-st.title("HPA Axis Simulation using Stochastic Differential Equations (SDE)")
-st.write("This app simulates the HPA axis using a system of stochastic differential equations (SDE).")
-st.write("The equations of the HPA axis model are:")
-st.latex(
-    r"""
-\begin{aligned}
-\frac{dx_1}{dt} &= b_1 \frac{1}{1 + \left(\frac{x_{3b}}{k_{gr}}\right)^3} \frac{1}{x_{3b}} u - a_1 x_1 \\
-\frac{dx_2}{dt} &= b_2 x_1 \frac{1}{1 + \left(\frac{x_3}{k_{gr}}\right)^3} - a_2 x_2 \\
-\frac{dx_3}{dt} &= b_3 x_2 - a_3 x_3 \\
-\frac{dx_{3b}}{dt} &= k (x_3-x_{3b}) - a_3 x_{3b}
-\end{aligned}
-"""
-)
-
 # Sidebar controls for parameters
-st.sidebar.title("Simulation Parameters")
 
 # Parameters for the drift function
-a1 = st.sidebar.number_input("a1", min_value=0.0, max_value=2.0, value=0.17, step=1e-4)
-b1 = st.sidebar.number_input("b1", min_value=0.0, max_value=2.0, value=0.255, step=1e-4)
-a2 = st.sidebar.number_input("a2", min_value=0.0, max_value=2.0, value=0.07, step=1e-4)
-b2 = st.sidebar.number_input("b2", min_value=0.0, max_value=2.0, value=0.14, step=1e-4)
-a3 = st.sidebar.number_input("a3", min_value=0.0, max_value=2.0, value=0.0086, step=1e-4)
-b3 = st.sidebar.number_input("b3", min_value=0.0, max_value=2.0, value=0.086, step=1e-4)
-k = st.sidebar.number_input("k", min_value=0.0, max_value=2.0, value=0.05, step=1e-4)
-u = st.sidebar.number_input("u", min_value=0.0, max_value=10.0, value=1.0, step=0.1)
-kgr = st.sidebar.number_input("kgr", min_value=0.1, max_value=10.0, value=5.0, step=0.1)
-amplitude = st.sidebar.slider("Amplitude of sin wave", min_value=0.0, max_value=1.0, value=0.3, step=0.01)
-period_in_hours = st.sidebar.slider("Period of sin wave (hours)", min_value=1, max_value=24, value=24, step=1)
-period = period_in_hours * 60  # Convert hours to minutes
-sigma = st.sidebar.slider("Noise Level (sigma)", min_value=0.0, max_value=1.0, value=0.2, step=0.01)
-T_in_hours = st.sidebar.slider("Simulation Time (hours)", min_value=1, max_value=48, value=24, step=1)
+
+sigma = st.sidebar.slider("Noise Level (sigma)", min_value=0.0, max_value=0.1, value=0.00, step=0.001)
+T_in_hours = st.sidebar.slider("Simulation Time (hours)", min_value=1, max_value=500, value=300, step=50)
 n_points = st.sidebar.slider("Time Steps", min_value=100, max_value=1000, value=400, step=50)
 
 
 # Pack parameters
-params = (a1, b1, a2, b2, a3, b3, k, u, kgr)
+# params = (b, u)
 
 
 # Compute steady-state initial conditions
 def f_to_solve(x):
-    return hpa_drift(x, 0, *params)
+    return one_d_model_drift(x, 0)
 
-
-guess = [1.0, 1.0, 1.0, 1.0]
+guess = [1, b, u]
 steady_state = fsolve(f_to_solve, guess)
-x0 = steady_state
-
+x0 = steady_state[0]
+# x0 = st.sidebar.slider("Initial Condition", min_value=0.0, max_value=1.0, value=.8, step=0.01)
+x0 = [x0, b, u]
+variables = ["x", "b", "u"]
 # Simulation time
-T = T_in_hours * 60
+T = T_in_hours 
 t = np.linspace(0, T, n_points)
 
 # Simulate the system
-sol = sde_solver_system(hpa_drift, x0, t, sigma, params, amplitude, period)
-if st.checkbox("Normalise the concentrations"):
-    sol = sol / np.max(sol, axis=0)
+parmas_1 = (0, db_temp)
+parmas_2 = (du_temp, 0)
+sol_1 = sde_solver_system(one_d_model_drift, x0, t, sigma, parmas_1)
+sol_2 = sde_solver_system(one_d_model_drift, x0, t, sigma, parmas_2)
+# if st.checkbox("Normalise the concentrations"):
+#     sol = sol / np.max(sol, axis=0)
 # Plotting
 t = t  # Convert time to hours
-st.write(f'steady state: {steady_state}')
-if st.checkbox("Matplotlib Plot"):
+import matplotlib.pyplot as plt
 
-    import matplotlib.pyplot as plt
+# Plotting
+fig, ax = plt.subplots()
 
-    fig, ax = plt.subplots()
-    ax.plot(t, sol[:, 0], label="x1")
-    ax.plot(t, sol[:, 1], label="x2")
-    ax.plot(t, sol[:, 2], label="x3")
-    ax.plot(t, sol[:, 3], label="x3b")
-    ax.set_xlabel("Time (hours)")
-    ax.set_ylabel("Concentrations")
-    ax.set_title("HPA Axis Simulation")
-    ax.legend()
-    st.pyplot(fig)
-else:
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=t, y=sol[:, 0], mode="lines", name="x1"))
-    fig.add_trace(go.Scatter(x=t, y=sol[:, 1], mode="lines", name="x2"))
-    fig.add_trace(go.Scatter(x=t, y=sol[:, 2], mode="lines", name="x3"))
-    fig.add_trace(go.Scatter(x=t, y=sol[:, 3], mode="lines", name="x3b"))
-    fig.update_layout(
-        title="HPA Axis Simulation",
-        xaxis_title="Time (hours)",
-        yaxis_title="Concentrations",
-        template="plotly_white",
+ax.plot(t, sol_1[:, 0], label="B focused treatment")
+ax.plot(t, sol_2[:, 0], label="u focused treatment")
+
+# ax.set_title("HPA Axis Simulation")
+ax.set_xlabel("Time [days]")
+ax.set_ylabel("symptoms [x]")
+# ax.grid(True)
+# remove the cage
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+
+
+# Add grey area for treatment
+ax.axvspan(start_time, end_time, facecolor='grey', alpha=0.1)
+
+# Add text for treatment
+ax.text(start_time + (end_time - start_time) / 2, 0.1, "Treatment", ha='center', va='center', fontsize=12)
+import labellines
+import io
+b_placed = st.number_input("Place b", 0, 300, 200)
+u_placed = st.number_input("Place u", 0, 300, 200)
+# labellines.labelLines(plt.gca().get_lines(), xvals=[b_placed,u_placed], zorder=2.5)
+
+ax.legend(loc='upper right')
+ax.set_ylim(0, 1)
+
+st.pyplot(fig)
+
+
+# SVG Download
+filename = st.text_input("Filename", "hpa_simulation")
+
+if "png_data" not in st.session_state:
+    st.session_state.png_data = None
+
+def fig_to_png(fig):
+    img = io.BytesIO()
+    fig.savefig(img, format='png')
+    img.seek(0)
+    return img
+
+if st.button("Convert Plot to PNG"):
+    st.session_state.png_data = fig_to_png(fig)
+
+if st.session_state.png_data is not None:
+    st.download_button(
+        label="Download Plot as PNG",
+        data=st.session_state.png_data,
+        file_name=f"{filename}.png",
+        mime="image/png",
     )
-
-    # Add grid lines to the plot
-    fig.update_xaxes(showgrid=True)
-    fig.update_yaxes(showgrid=True)
-
-    st.plotly_chart(fig)
-
-
-    # SVG Download
-    filename = st.text_input("Filename", "hpa_simulation")
-    if "svg_data" not in st.session_state:
-        st.session_state.svg_data = None
-
-
-    def fig_to_svg(fig):
-        img_bytes = fig.to_image(format="svg")
-        return img_bytes.decode("utf-8")
-
-
-    if st.button("Convert Plot to SVG"):
-        st.session_state.svg_data = fig_to_svg(fig)
-
-    if st.session_state.svg_data is not None:
-        st.download_button(
-            label="Download Plot as SVG",
-            data=st.session_state.svg_data.encode("utf-8"),
-            file_name=f"{filename}.svg",
-            mime="image/svg+xml",
-        )
 
 st.markdown(
     """
