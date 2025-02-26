@@ -1,32 +1,25 @@
+# 1. Imports
 import streamlit as st
 import numpy as np
 from scipy.optimize import fsolve
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import labellines
+import io
 
-st.sidebar.title("Simulation Parameters")
-
-db_temp = st.sidebar.slider("db", min_value=-0.1, max_value=0.1, value=0.0, step=1e-3) / 100 
-du_temp = st.sidebar.slider("du", min_value=-5.0, max_value=0.0, value=-0.1, step=1e-3, format="%.4f") / 100
-b = st.sidebar.slider("b", min_value=0.0, max_value=1.0, value=0.2, step=1e-2)
-u = st.sidebar.slider("u", min_value=0.0, max_value=5.0, value=0.0, step=0.1)
-end_time = st.sidebar.slider("Until time", min_value=0, max_value=300, value=100, step=1)
-start_time = st.sidebar.slider("From time", min_value=0, max_value=100, value=10, step=1)
-def one_d_model_drift(x, t, u_val_treat = 0, db_val_treat=0):
+# 2. Function definitions
+def one_d_model_drift(x, t, u_val_treat=0, db_val_treat=0, start_time=10, end_time=100):
     x_cur, b_cur, u_cur = x
     if t  > start_time and t < end_time:
         dx = x_cur**2 * (1 - x_cur) - b_cur * x_cur + u_val_treat
         du = 0
         db = db_val_treat
     else:
-        # dx = x_cur**2 * (1 - x_cur) - b * x_cur + u
-        u_cur = 0
-        dx = x_cur**2 * (1 - x_cur) - b_cur * x_cur + u_cur
+        dx = x_cur**2 * (1 - x_cur) - b_cur * x_cur
         du = 0
         db = 0
     return np.array([dx, db, du])
 
-
-# Euler–Maruyama SDE solver for systems
 def sde_solver_system(drift, x0, t, sigma, params=None):
     if params is None:
         params = ()
@@ -41,19 +34,25 @@ def sde_solver_system(drift, x0, t, sigma, params=None):
         x[i][0] += sigma * dw
     return x
 
+def fig_to_png(fig):
+    img = io.BytesIO()
+    fig.savefig(img, format='png')
+    img.seek(0)
+    return img
 
-# Sidebar controls for parameters
+# 3. Streamlit UI and parameter setup
+st.sidebar.title("Simulation Parameters")
 
-# Parameters for the drift function
+db_temp = st.sidebar.slider("db", min_value=-0.1, max_value=3.0, value=0.0, step=1e-1) / 100 
+du_temp = st.sidebar.slider("du", min_value=-7.0, max_value=0.0, value=-6.0, step=1e-3, format="%.4f") / 100
+b = st.sidebar.slider("b", min_value=0.0, max_value=1.0, value=0.2, step=1e-2)
+u = st.sidebar.slider("u", min_value=0.0, max_value=5.0, value=0.0, step=0.1)
+end_time = st.sidebar.slider("Until time", min_value=0, max_value=300, value=100, step=1)/8
+start_time = st.sidebar.slider("From time", min_value=0, max_value=100, value=10, step=1) /8 
 
 sigma = st.sidebar.slider("Noise Level (sigma)", min_value=0.0, max_value=0.1, value=0.00, step=0.001)
-T_in_hours = st.sidebar.slider("Simulation Time (hours)", min_value=1, max_value=500, value=300, step=50)
+T_in_hours = st.sidebar.slider("Simulation Time (hours)", min_value=1, max_value=500, value=50, step=10) 
 n_points = st.sidebar.slider("Time Steps", min_value=100, max_value=1000, value=400, step=50)
-
-
-# Pack parameters
-# params = (b, u)
-
 
 # Compute steady-state initial conditions
 def f_to_solve(x):
@@ -62,67 +61,56 @@ def f_to_solve(x):
 guess = [1, b, u]
 steady_state = fsolve(f_to_solve, guess)
 x0 = steady_state[0]
-# x0 = st.sidebar.slider("Initial Condition", min_value=0.0, max_value=1.0, value=.8, step=0.01)
 x0 = [x0, b, u]
 variables = ["x", "b", "u"]
+
 # Simulation time
 T = T_in_hours 
 t = np.linspace(0, T, n_points)
 
-# Simulate the system
-parmas_1 = (0, db_temp)
-parmas_2 = (du_temp, 0)
+# 4. Solve the system and plot
+parmas_1 = (0, db_temp, start_time, end_time)
+parmas_2 = (du_temp, 0, start_time, end_time)
 sol_1 = sde_solver_system(one_d_model_drift, x0, t, sigma, parmas_1)
 sol_2 = sde_solver_system(one_d_model_drift, x0, t, sigma, parmas_2)
-# if st.checkbox("Normalise the concentrations"):
-#     sol = sol / np.max(sol, axis=0)
-# Plotting
-t = t  # Convert time to hours
-import matplotlib.pyplot as plt
-
+start_time*=8
+end_time*=8
+t= t*8
 # Plotting
 fig, ax = plt.subplots()
 
 ax.plot(t, sol_1[:, 0], label="B focused treatment")
 ax.plot(t, sol_2[:, 0], label="u focused treatment")
-
-# ax.set_title("HPA Axis Simulation")
+ax.plot(t, sol_1[:, 1], label="b")
+# plot a step function for u low where t is between start_time and end_time
+u_low = np.zeros_like(t)
+st.write(du_temp)
+u_low[(t > start_time) & (t < end_time)] = du_temp
+ax.plot(t, u_low, label="u")
 ax.set_xlabel("Time [days]")
 ax.set_ylabel("symptoms [x]")
-# ax.grid(True)
-# remove the cage
 ax.spines['top'].set_visible(False)
 ax.spines['right'].set_visible(False)
-
 
 # Add grey area for treatment
 ax.axvspan(start_time, end_time, facecolor='grey', alpha=0.1)
 
 # Add text for treatment
 ax.text(start_time + (end_time - start_time) / 2, 0.1, "Treatment", ha='center', va='center', fontsize=12)
-import labellines
-import io
+
 b_placed = st.number_input("Place b", 0, 300, 200)
 u_placed = st.number_input("Place u", 0, 300, 200)
-# labellines.labelLines(plt.gca().get_lines(), xvals=[b_placed,u_placed], zorder=2.5)
 
 ax.legend(loc='upper right')
-ax.set_ylim(0, 1)
+# ax.set_ylim(0, 1)
 
 st.pyplot(fig)
-
 
 # SVG Download
 filename = st.text_input("Filename", "hpa_simulation")
 
 if "png_data" not in st.session_state:
     st.session_state.png_data = None
-
-def fig_to_png(fig):
-    img = io.BytesIO()
-    fig.savefig(img, format='png')
-    img.seek(0)
-    return img
 
 if st.button("Convert Plot to PNG"):
     st.session_state.png_data = fig_to_png(fig)
@@ -137,7 +125,6 @@ if st.session_state.png_data is not None:
 
 st.markdown(
     """
-
 ### Summary of the HPA Axis Model
 
 1. **Equation for $ \\frac{dx_1}{dt} $**:
@@ -149,7 +136,6 @@ st.markdown(
    - $ u $: External stimulus
    - $ a_1 $: Degradation rate of CRH
    - $ k_{gr} $: Concentration of cortisol at which the GR response is at half of its maximum effectiveness (EC50).
-   - 
 
 2. **Equation for $ \\frac{dx_2}{dt} $**:
    $$\\frac{dx_2}{dt} = b_2 x_1 \\frac{1}{1 + \\left(\\frac{x_3}{k_{gr}}\\right)^3} - a_2 x_2$$
