@@ -43,8 +43,9 @@ def fig_to_png(fig):
 # 3. Streamlit UI and parameter setup
 st.sidebar.title("Simulation Parameters")
 
-db_temp = st.sidebar.slider("db", min_value=-0.1, max_value=3.0, value=0.0, step=1e-1) / 100 
-du_temp = st.sidebar.slider("du", min_value=-7.0, max_value=0.0, value=-6.0, step=1e-3, format="%.4f") / 100
+# db_1 = st.sidebar.slider("db", min_value=-0.1, max_value=3.0, value=0.0, step=1e-1) / 100 
+du_1 = st.sidebar.slider("du_1", min_value=-7.0, max_value=0.0, value=-4.0, step=1e-2, format="%.4f") / 100
+du_2 = st.sidebar.slider("du_2", min_value=-7.0, max_value=0.0, value=-6.5, step=1e-2, format="%.4f") / 100
 b = st.sidebar.slider("b", min_value=0.0, max_value=1.0, value=0.2, step=1e-2)
 u = st.sidebar.slider("u", min_value=0.0, max_value=5.0, value=0.0, step=0.1)
 end_time = st.sidebar.slider("Until time", min_value=0, max_value=300, value=100, step=1)/8
@@ -69,8 +70,8 @@ T = T_in_hours
 t = np.linspace(0, T, n_points)
 
 # 4. Solve the system and plot
-parmas_1 = (0, db_temp, start_time, end_time)
-parmas_2 = (du_temp, 0, start_time, end_time)
+parmas_1 = (du_1, 0, start_time, end_time)
+parmas_2 = (du_2, 0, start_time, end_time)
 sol_1 = sde_solver_system(one_d_model_drift, x0, t, sigma, parmas_1)
 sol_2 = sde_solver_system(one_d_model_drift, x0, t, sigma, parmas_2)
 start_time*=8
@@ -79,14 +80,17 @@ t= t*8
 # Plotting
 fig, ax = plt.subplots()
 
-ax.plot(t, sol_1[:, 0], label="B focused treatment")
-ax.plot(t, sol_2[:, 0], label="u focused treatment")
-ax.plot(t, sol_1[:, 1], label="b")
+ax.plot(t, sol_1[:, 0], label="relapse")
+ax.plot(t, sol_2[:, 0], label="remission")
+# ax.plot(t, sol_1[:, 1], label="b")
 # plot a step function for u low where t is between start_time and end_time
-u_low = np.zeros_like(t)
-st.write(du_temp)
-u_low[(t > start_time) & (t < end_time)] = du_temp
-ax.plot(t, u_low, label="u")
+u1_low = np.zeros_like(t)
+u1_low[(t > start_time) & (t < end_time)] = du_1
+# ax.plot(t, u1_low, label="u relapse value")
+u2_low = np.zeros_like(t)
+u2_low[(t > start_time) & (t < end_time)] = du_2
+# ax.plot(t, u2_low, label="u remission value")
+# 
 ax.set_xlabel("Time [days]")
 ax.set_ylabel("symptoms [x]")
 ax.spines['top'].set_visible(False)
@@ -96,13 +100,15 @@ ax.spines['right'].set_visible(False)
 ax.axvspan(start_time, end_time, facecolor='grey', alpha=0.1)
 
 # Add text for treatment
-ax.text(start_time + (end_time - start_time) / 2, 0.1, "Treatment", ha='center', va='center', fontsize=12)
+ax.text(start_time + (end_time - start_time) / 2, 0.1, "treatment", ha='center', va='center', fontsize=12)
 
 b_placed = st.number_input("Place b", 0, 300, 200)
 u_placed = st.number_input("Place u", 0, 300, 200)
 
-ax.legend(loc='upper right')
-# ax.set_ylim(0, 1)
+# ax.legend(loc='upper right')
+ax.set_ylim(-0.1, 1)
+# lableines
+labellines.labelLines(ax.get_lines(), xvals=[300,300], zorder=2.5, )
 
 st.pyplot(fig)
 
